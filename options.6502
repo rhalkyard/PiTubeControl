@@ -1,0 +1,78 @@
+; PiTubeDirect option handlers
+; Copyright Richard Halkyard, 2021.
+;
+; For every argument given after the processor name, the corresponding option
+; handler will be called with the Carry bit clear, and a null-terminated
+; argument string in `namebuf`.
+;
+; At the end of argument processing, the option handler will be called again
+; with the Carry bit set, allowing it to perform any finalization of the
+; collected options.
+
+OPT_FAST  = %00000001
+OPT_L6502 = %00000010
+
+.str_fast
+    EQUS "FAST", 0
+
+.str_lib6502
+    EQUS "L6502", 0
+
+; Default option handler, rejects any option arguments.
+.no_opts
+{
+    BCS ok
+    BRK: EQUB 255: EQUS "Selected coprocessor has no options.", 0
+.ok 
+    RTS
+}
+
+.bad_opt
+    BRK:EQUB 255:EQUS "Invalid option.", 0
+
+.do_65c02_opts
+{
+    BCS opts_fini
+
+    LDW str_lib6502, ptr
+    JSR strcmp
+    BNE not_lib6502
+    LDA #OPT_L6502:ORA opt_flags:STA opt_flags
+    RTS
+
+.not_lib6502
+    LDW str_fast, ptr
+    JSR strcmp
+    BNE bad_opt
+    LDA #OPT_FAST:ORA opt_flags:STA opt_flags
+    RTS
+
+.opts_fini
+    LDA #OPT_L6502:BIT opt_flags
+    BNE opts_l6502
+    LDA #OPT_FAST:BIT opt_flags
+    BEQ opts_done
+    DEC copro_num
+    RTS
+
+.opts_l6502
+    LDY #16:STY copro_num
+    LDA #OPT_FAST:BIT opt_flags
+    BEQ opts_done
+    INC copro_num
+.opts_done
+    RTS
+}
+
+.do_65c102_opts
+{
+    BCS done
+.do_opts
+    LDW str_fast, ptr
+    JSR strcmp
+    BNE bad_opt
+    DEC copro_num
+.done
+    RTS
+}
+

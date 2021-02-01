@@ -1,0 +1,152 @@
+; PiTubeControl - A(nother) control utility for PiTubeDirect
+; Copyright Richard Halkyard, 2021.
+
+OSARGS=&FFDA
+GSINIT=&FFC2
+GSREAD=&FFC5
+OSBYTE=&FFF4
+OSWRCH=&FFEE
+OSNEWL=&FFE7
+
+GSTEXT = &F2
+
+MACRO LDW word, dest
+    LDA #<word
+    STA dest
+    LDA #>word
+    STA dest+1
+ENDMACRO
+
+    ORG &70
+    ; Zeropage locations use BASIC user area &70-7F, hopefully this shouldn't
+    ; clobber anything important
+.ptr
+    SKIP 2
+.opt_addr
+    SKIP 2
+.copro_num
+    SKIP 1
+.opt_flags
+    SKIP 1
+
+    GUARD &80
+
+    ORG &2100
+.start
+    ; load GSTEXT pointer with address of command-line tail
+    ; OSARGS 1,x,0 writes 2 extra bytes, so we can't load directly into GSTEXT
+    LDA #1:LDX #ptr:LDY #0:JSR OSARGS
+    LDA ptr:STA GSTEXT:LDA ptr+1:STA GSTEXT+1
+
+    JSR readstr     ; Read first arg from the command line into namebuf
+    BCS usage       ; No arguments? Quit and show usage message
+
+    ; Look up name in coprocessor table
+    LDW copro_tbl, ptr
+    LDX #TBL_ENTRY_SIZE
+    JSR lookup
+    BCS usage       ; Name not in table? Quit and show usage message
+
+    ; Read coprocessor ID from table
+    LDY #7:LDA (ptr),Y:STA copro_num
+
+    ; Read option-handler address from table
+    INY:LDA (ptr),Y:STA opt_addr
+    INY:LDA (ptr),Y:STA opt_addr+1
+
+    LDA #0:STA opt_flags
+.optloop
+    ; Loop through remaining arguments and offer to the option handler
+    JSR readstr
+    BCS optsdone    ; carry set: no more arguments
+    JSR call_opts   ; call option handler
+    JMP optloop     ; option handler ends option loop by returning with carry
+.optsdone
+    JSR call_opts   ; call handler with carry set to finalise options
+
+    ; Set coprocessor (*FX 151,230,copro_num)
+    LDA #151:LDX #230:LDY copro_num:JSR OSBYTE
+
+    LDW str_exitok, ptr
+.exitmsg
+    LDY #0
+.msgloop
+    LDA (ptr), y
+    BEQ done
+    JSR OSWRCH
+    INY
+    BNE msgloop
+    INC ptr+1
+    BNE msgloop
+.done
+    JSR OSNEWL
+    RTS
+
+.usage
+    LDW str_usage, ptr
+    JMP exitmsg
+    
+; hack around the 6502's lack of 'JSR (addr)'. 
+.call_opts
+    JMP (opt_addr)
+
+    INCLUDE "util.6502"
+    INCLUDE "options.6502"
+
+; Table of processor names. Format:
+;  6 bytes      Coprocessor name, padded with Null bytes
+;  1 byte       Null byte
+;  1 byte       Coprocessor ID (as used with *FX 151,230,x)
+;  2 bytes      Address of option-handler subroutine
+TBL_ENTRY_SIZE = 6 + 1 + 1 + 2
+.copro_tbl
+    EQUS "65C02", 0, 0,         1:  EQUW do_65c02_opts
+    EQUS "6502", 0, 0, 0,       1:  EQUW do_65c02_opts
+    EQUS "65C102", 0,           3:  EQUW do_65c102_opts
+    EQUS "65102", 0, 0,         3:  EQUW do_65c102_opts
+    EQUS "Z80", 0, 0, 0, 0,     4:  EQUW no_opts
+    EQUS "80286", 0, 0,         8:  EQUW no_opts
+    EQUS "286", 0, 0, 0, 0,     8:  EQUW no_opts
+    EQUS "MC6809", 0,           9:  EQUW no_opts
+    EQUS "6809", 0, 0, 0,       9:  EQUW no_opts
+    EQUS "PDP11", 0, 0,         11: EQUW no_opts
+    EQUS "ARM2", 0, 0, 0,       12: EQUW no_opts
+    EQUS "ARM", 0, 0, 0, 0,     12: EQUW no_opts
+    EQUS "32016", 0, 0,         13: EQUW no_opts
+    EQUS "OFF", 0, 0, 0, 0,     14: EQUW no_opts
+    EQUS "NATIVE", 0,           15: EQUW no_opts
+    EQUS "PI", 0, 0, 0, 0, 0,   15: EQUW no_opts
+    EQUB 0
+
+.str_exitok
+    EQUS "PiTubeDirect configured.", &0A, &0D
+    EQUS "Press Ctrl-BREAK to apply changes.", &0A, &0D, 0
+
+.str_usage
+    EQUS "PiTubeControl v0.01 by Richard Halkyard", &0A, &0D
+    EQUS "Usage: *PiTube <processor> [options...]", &0A, &0D, &0A, &0D
+    EQUS "Available processor types and options:", &0A, &0D
+    EQUS "  65C02 (6502)", &0A, &0D
+    EQUS "    FAST - run as fast as possible", &0A, &0D
+    EQUS "    L6502 - use lib6502 emulation core", &0A, &0D
+    EQUS "  65C102 (65102)", &0A, &0D
+    EQUS "    FAST - run as fast as possible", &0A, &0D
+    EQUS "  Z80", &0A, &0D
+    EQUS "  80286 (286)", &0A, &0D
+    EQUS "  MC6809 (6809)", &0A, &0D
+    EQUS "  PDP11", &0A, &0D
+    EQUS "  32016", &0A, &0D
+    EQUS "  ARM2 (ARM) - ARM Evaluation System", &0A, &0D
+    EQUS "  NATIVE (PI) - Native ARM6/ARM7", &0A, &0D
+    EQUB &0A, &0D
+    EQUS "Example: *PITUBE 65C02 FAST", &0A, &0D
+    EQUS "Selects 65C02 emulation, running at max speed", &0A, &0D
+    EQUB 0
+
+.end
+
+.namebuf
+    SKIP 32
+
+    SAVE "PiTube", start, end, &30000 + start, &30000 + start
+    PUTTEXT "README.md", "README", &3FFFF

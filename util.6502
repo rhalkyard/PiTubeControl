@@ -1,0 +1,70 @@
+; Utility functions for PiTubeControl
+; Copyright Richard Halkyard, 2021.
+
+; Read a whitespace-separated token into namebuf using GSINIT/GSREAD
+; Advances GSTEXT pointer by the number of characters read.
+; Returns with carry clear if OK, carry set if no data available.
+; Corrupts A, X, Y.
+.readstr
+{   
+    LDY #0:CLC:JSR GSINIT
+    BEQ err
+    LDX #0
+.loop
+    JSR GSREAD
+    STA namebuf, X
+    INX
+    BCC loop
+    LDA #0:STA namebuf-1, X
+
+    ; advance GSTEXT pointer by number of chars read (including trailing 
+    ; whitespace)
+    CLC:TYA:ADC GSTEXT:STA GSTEXT:LDA GSTEXT+1:ADC #0:STA GSTEXT+1
+    RTS
+.err
+    SEC
+    RTS
+}
+
+; Lookup a string value in the table pointed to by ptr
+; Call with the table entry size in X
+; Returns with carry clear and address of table entry in ptr on success,
+; carry set on failure. Corrupts A, Y.
+.lookup
+{
+    LDY #0
+    LDA (ptr),Y
+    BNE ok
+    SEC:RTS
+.ok
+    JSR strcmp
+    BEQ lookupdone
+    TXA
+    CLC:ADC ptr:STA ptr:LDA ptr+1:ADC #0:STA ptr+1
+    JMP lookup
+.lookupdone
+    CLC:RTS
+}
+
+; Compare string in namebuf with string pointed to by ptr. Case insensitive.
+; Returns equal/not-equal status in zero flag. Corrupts A, Y.
+.strcmp
+{
+    LDY #0
+.loop
+    LDA namebuf,Y
+    CMP #'a'
+    BCC check
+    CMP #'z'+1
+    BCS check
+    SEC:SBC #'a'-'A'
+.check
+    CMP (ptr),Y
+    BNE done
+    INY
+    CMP #0
+    BNE loop
+    RTS
+.done
+    RTS
+}
